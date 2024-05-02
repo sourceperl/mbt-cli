@@ -3,29 +3,40 @@
 """
 A modbus/TCP command-line cli.
 
+Minimal python version: 3.9
 """
 
-import argparse
+from argparse import ArgumentError, ArgumentParser, ArgumentTypeError, Namespace
 import cmd
+import sys
 from pyModbusTCP.client import ModbusClient
+from pyModbusTCP.constants import MB_EXCEPT_ERR
 
 
 # some const
 NAME = 'mbt-cli'
 VERSION = '0.0.1'
+MIN_PYTHON = (3, 9)
 
 
-class RequestData:
-    address: int = 0
-    number: int = 0
-    read_list: list = None
+# some functions
+def valid_int(min: int, max: int):
+    def _valid_int(x: str):
+        try:
+            x = int(x, 0)
+        except ValueError:
+            raise ArgumentTypeError('not an int')
+        if not min <= x <= max:
+            raise ArgumentTypeError(f'not in valid range [{min}-{max}]')
+        return x
+    return _valid_int
 
 
-class MbtCli(cmd.Cmd):
+# some class
+class MbtCmd(cmd.Cmd):
     """ CLI tool to deal with a modbus/TCP server. """
 
     intro = 'CLI tool to deal with a modbus/TCP server (type help or ?).'
-    request = RequestData()
 
     @property
     def prompt(self):
@@ -47,12 +58,17 @@ class MbtCli(cmd.Cmd):
         except IndexError:
             self.request.number = 1
 
-    def _dump_results(self):
-        if self.request.read_list:
-            for idx in range(0, len(self.request.read_list)):
-                msg = f'{idx} 0x{self.request.address + idx:04x} ' \
-                      f'({self.request.address + idx:d}) {self.request.read_list[idx]}'
-                print(msg)
+    def _dump_results(self, ret_list: list, cmd_args: Namespace):
+        if ret_list:
+            for idx in range(0, cmd_args.number):
+                try:
+                    reg_str = str(ret_list[idx])
+                except IndexError:
+                    reg_str = 'n/a'
+                print(f'{idx} @{cmd_args.address + idx} {reg_str}')
+        elif not mbus_cli.debug:
+            except_str = f' ({mbus_cli.last_except_as_txt})' if mbus_cli.last_error == MB_EXCEPT_ERR else ''
+            print(mbus_cli.last_error_as_txt + except_str)
 
     def do_debug(self, arg: str = ''):
         """Check or set debug status\n\ndebug [on/off]"""
@@ -120,19 +136,61 @@ class MbtCli(cmd.Cmd):
     def do_read_coils(self, arg: str = ''):
         """Modbus function 1 (read coils)\n\nread_coils [address] [number of coils]"""
         try:
-            self._parse_read_args(arg)
-            self.request.read_list = mbus_cli.read_coils(self.request.address, self.request.number)
-            self._dump_results()
-        except ValueError as e:
+            # parse args
+            cmd_parser = ArgumentParser(add_help=False, exit_on_error=False)
+            cmd_parser.add_argument('address', nargs='?', type=valid_int(min=0, max=0xffff), default=0)
+            cmd_parser.add_argument('number', nargs='?', type=valid_int(min=1, max=2000), default=1)
+            cmd_args = cmd_parser.parse_args(arg.split())
+            # do modbus job
+            ret_list = mbus_cli.read_coils(cmd_args.address, cmd_args.number)
+            # show result
+            self._dump_results(ret_list, cmd_args)
+        except (ArgumentError, ValueError) as e:
             print(e)
 
     def do_read_discrete_inputs(self, arg: str = ''):
         """Modbus function 2 (read discrete inputs)\n\nread_discrete_inputs [address] [number of inputs]"""
         try:
-            self._parse_read_args(arg)
-            self.request.read_list = mbus_cli.read_discrete_inputs(self.request.address, self.request.number)
-            self._dump_results()
-        except ValueError as e:
+            # parse args
+            cmd_parser = ArgumentParser(add_help=False, exit_on_error=False)
+            cmd_parser.add_argument('address', nargs='?', type=valid_int(min=0, max=0xffff), default=0)
+            cmd_parser.add_argument('number', nargs='?', type=valid_int(min=1, max=2000), default=1)
+            cmd_args = cmd_parser.parse_args(arg.split())
+            # do modbus job
+            ret_list = mbus_cli.read_discrete_inputs(cmd_args.address, cmd_args.number)
+            # show result
+            self._dump_results(ret_list, cmd_args)
+        except (ArgumentError, ValueError) as e:
+            print(e)
+
+    def do_read_holding_registers(self, arg: str = ''):
+        """Modbus function 3 (read holding registers)\n\nread_holding_registers [address] [number of inputs]"""
+        try:
+            # parse args
+            cmd_parser = ArgumentParser(add_help=False, exit_on_error=False)
+            cmd_parser.add_argument('address', nargs='?', type=valid_int(min=0, max=0xffff), default=0)
+            cmd_parser.add_argument('number', nargs='?', type=valid_int(min=1, max=125), default=1)
+            cmd_args = cmd_parser.parse_args(arg.split())
+            # do modbus job
+            ret_list = mbus_cli.read_holding_registers(cmd_args.address, cmd_args.number)
+            # show result
+            self._dump_results(ret_list, cmd_args)
+        except (ArgumentError, ValueError) as e:
+            print(e)
+
+    def do_read_input_registers(self, arg: str = ''):
+        """Modbus function 4 (read input registers)\n\nread_input_registers [address] [number of inputs]"""
+        try:
+            # parse args
+            cmd_parser = ArgumentParser(add_help=False, exit_on_error=False)
+            cmd_parser.add_argument('address', nargs='?', type=valid_int(min=0, max=0xffff), default=0)
+            cmd_parser.add_argument('number', nargs='?', type=valid_int(min=1, max=125), default=1)
+            cmd_args = cmd_parser.parse_args(arg.split())
+            # do modbus job
+            ret_list = mbus_cli.read_input_registers(cmd_args.address, cmd_args.number)
+            # show result
+            self._dump_results(ret_list, cmd_args)
+        except (ArgumentError, ValueError) as e:
             print(e)
 
     def do_version(self, _arg):
@@ -145,10 +203,13 @@ class MbtCli(cmd.Cmd):
 
 
 if __name__ == '__main__':
+    # check python version
+    if sys.version_info  < MIN_PYTHON:
+        sys.exit(f'python version {MIN_PYTHON[0]}.{MIN_PYTHON[1]} or later is required')
     # init
-    mbt_cli = MbtCli()
+    mbt_cmd = MbtCmd()
     # parse command line args
-    parser = argparse.ArgumentParser(add_help=False)
+    parser = ArgumentParser(add_help=False)
     parser.add_argument('--help', action='help', help='show this help message and exit')
     parser.add_argument('-d', '--debug', action='store_true', help='debug mode')
     parser.add_argument('-h', '--host', type=str, default='localhost', help='server host (default: localhost)')
@@ -165,11 +226,11 @@ if __name__ == '__main__':
                                 timeout=args.timeout, debug=args.debug)
         # start cli loop or just a one shot run (command set at cmd line)
         if not args.command:
-            mbt_cli.cmdloop()
+            mbt_cmd.cmdloop()
         else:
             # convert list of args -> command line
             cmd_line = ' '.join(args.command)
-            mbt_cli.onecmd(cmd_line)
+            mbt_cmd.onecmd(cmd_line)
     except ValueError as e:
         print(f'error occur: {e}')
     except KeyboardInterrupt:
