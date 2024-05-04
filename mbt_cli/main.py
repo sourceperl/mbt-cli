@@ -1,22 +1,12 @@
-#!/usr/bin/env python3
-
-"""
-A modbus/TCP command-line cli.
-
-Minimal python version: 3.9
-"""
-
 from argparse import ArgumentError, ArgumentParser, ArgumentTypeError, Namespace
 import cmd
-import sys
 from pyModbusTCP.client import ModbusClient
 from pyModbusTCP.constants import MB_EXCEPT_ERR
+from . import __version__ as VERSION
 
 
 # some const
 NAME = 'mbt-cli'
-VERSION = '0.0.1'
-MIN_PYTHON = (3, 9)
 
 
 # some functions
@@ -37,11 +27,12 @@ class MbtCmd(cmd.Cmd):
     """ CLI tool to deal with a modbus/TCP server. """
 
     intro = 'CLI tool to deal with a modbus/TCP server (type help or ?).'
+    mb_client = ModbusClient()
 
     @property
     def prompt(self):
         """Set cli prompt (like "127.0.0.1:502> ")"""
-        return f'{mbus_cli.host}:{mbus_cli.port}> '
+        return f'{self.mb_client.host}:{self.mb_client.port}> '
 
     def emptyline(self) -> bool:
         """Avoid empty line execute again the last command"""
@@ -66,9 +57,9 @@ class MbtCmd(cmd.Cmd):
                 except IndexError:
                     reg_str = 'n/a'
                 print(f'{idx} @{cmd_args.address + idx} {reg_str}')
-        elif not mbus_cli.debug:
-            except_str = f' ({mbus_cli.last_except_as_txt})' if mbus_cli.last_error == MB_EXCEPT_ERR else ''
-            print(mbus_cli.last_error_as_txt + except_str)
+        elif not self.mb_client.debug:
+            except_str = f' ({self.mb_client.last_except_as_txt})' if self.mb_client.last_error == MB_EXCEPT_ERR else ''
+            print(self.mb_client.last_error_as_txt + except_str)
 
     def do_debug(self, arg: str = ''):
         """Check or set debug status\n\ndebug [on/off]"""
@@ -76,13 +67,13 @@ class MbtCmd(cmd.Cmd):
         debug_set = arg.strip().lower()
         if debug_set:
             if debug_set == 'on':
-                mbus_cli.debug = True
+                self.mb_client.debug = True
             elif debug_set == 'off':
-                mbus_cli.debug = False
+                self.mb_client.debug = False
             else:
                 print('unable to set debug flag')
         # show status
-        debug_str = 'on' if mbus_cli.debug else 'off'
+        debug_str = 'on' if self.mb_client.debug else 'off'
         print(f'debug is {debug_str}')
 
     def do_host(self, arg: str = ''):
@@ -91,11 +82,11 @@ class MbtCmd(cmd.Cmd):
         host_set = arg.strip().lower()
         if host_set:
             try:
-                mbus_cli.host = str(host_set)
+                self.mb_client.host = str(host_set)
             except ValueError:
                 print('unable to set host')
         # show status
-        print(f'current host is "{mbus_cli.host}"')
+        print(f'current host is "{self.mb_client.host}"')
 
     def do_port(self, arg: str = ''):
         """Check or set port\n\nport [tcp port]"""
@@ -103,11 +94,11 @@ class MbtCmd(cmd.Cmd):
         port_set = arg.strip().lower()
         if port_set:
             try:
-                mbus_cli.port = int(port_set)
+                self.mb_client.port = int(port_set)
             except ValueError:
                 print('unable to set port')
         # show status
-        print(f'current port value is {mbus_cli.port}')
+        print(f'current port value is {self.mb_client.port}')
 
     def do_timeout(self, arg: str = ''):
         """Check or set timeout\n\ntimeout [timeout value in s]"""
@@ -115,11 +106,11 @@ class MbtCmd(cmd.Cmd):
         timeout_set = arg.strip().lower()
         if timeout_set:
             try:
-                mbus_cli.timeout = float(timeout_set)
+                self.mb_client.timeout = float(timeout_set)
             except ValueError:
                 print('unable to set timeout')
         # show status
-        print(f'timeout is {mbus_cli.timeout} s')
+        print(f'timeout is {self.mb_client.timeout} s')
 
     def do_unit_id(self, arg: str = ''):
         """Check or set unit-id\n\nunit_id [unit_id]"""
@@ -127,11 +118,11 @@ class MbtCmd(cmd.Cmd):
         unit_id_set = arg.strip().lower()
         if unit_id_set:
             try:
-                mbus_cli.unit_id = int(unit_id_set)
+                self.mb_client.unit_id = int(unit_id_set)
             except ValueError:
                 print('unable to set unit-id')
         # show status
-        print(f'unit-id is set to {mbus_cli.unit_id}')
+        print(f'unit-id is set to {self.mb_clientt.unit_id}')
 
     def do_read_coils(self, arg: str = ''):
         """Modbus function 1 (read coils)\n\nread_coils [address] [number of coils]"""
@@ -142,7 +133,7 @@ class MbtCmd(cmd.Cmd):
             cmd_parser.add_argument('number', nargs='?', type=valid_int(min=1, max=2000), default=1)
             cmd_args = cmd_parser.parse_args(arg.split())
             # do modbus job
-            ret_list = mbus_cli.read_coils(cmd_args.address, cmd_args.number)
+            ret_list = self.mb_client.read_coils(cmd_args.address, cmd_args.number)
             # show result
             self._dump_results(ret_list, cmd_args)
         except (ArgumentError, ValueError) as e:
@@ -157,7 +148,7 @@ class MbtCmd(cmd.Cmd):
             cmd_parser.add_argument('number', nargs='?', type=valid_int(min=1, max=2000), default=1)
             cmd_args = cmd_parser.parse_args(arg.split())
             # do modbus job
-            ret_list = mbus_cli.read_discrete_inputs(cmd_args.address, cmd_args.number)
+            ret_list = self.mb_client.read_discrete_inputs(cmd_args.address, cmd_args.number)
             # show result
             self._dump_results(ret_list, cmd_args)
         except (ArgumentError, ValueError) as e:
@@ -172,7 +163,7 @@ class MbtCmd(cmd.Cmd):
             cmd_parser.add_argument('number', nargs='?', type=valid_int(min=1, max=125), default=1)
             cmd_args = cmd_parser.parse_args(arg.split())
             # do modbus job
-            ret_list = mbus_cli.read_holding_registers(cmd_args.address, cmd_args.number)
+            ret_list = self.mb_client.read_holding_registers(cmd_args.address, cmd_args.number)
             # show result
             self._dump_results(ret_list, cmd_args)
         except (ArgumentError, ValueError) as e:
@@ -187,7 +178,7 @@ class MbtCmd(cmd.Cmd):
             cmd_parser.add_argument('number', nargs='?', type=valid_int(min=1, max=125), default=1)
             cmd_args = cmd_parser.parse_args(arg.split())
             # do modbus job
-            ret_list = mbus_cli.read_input_registers(cmd_args.address, cmd_args.number)
+            ret_list = self.mb_client.read_input_registers(cmd_args.address, cmd_args.number)
             # show result
             self._dump_results(ret_list, cmd_args)
         except (ArgumentError, ValueError) as e:
@@ -202,12 +193,7 @@ class MbtCmd(cmd.Cmd):
         return True
 
 
-if __name__ == '__main__':
-    # check python version
-    if sys.version_info  < MIN_PYTHON:
-        sys.exit(f'python version {MIN_PYTHON[0]}.{MIN_PYTHON[1]} or later is required')
-    # init
-    mbt_cmd = MbtCmd()
+def main():
     # parse command line args
     parser = ArgumentParser(add_help=False)
     parser.add_argument('--help', action='help', help='show this help message and exit')
@@ -221,9 +207,14 @@ if __name__ == '__main__':
 
     # run tool
     try:
-        # init modbus client
-        mbus_cli = ModbusClient(host=args.host, port=args.port, unit_id=args.unit_id,
-                                timeout=args.timeout, debug=args.debug)
+        # init
+        mbt_cmd = MbtCmd()
+        # apply args to modbus client
+        mbt_cmd.mb_client.host = args.host
+        mbt_cmd.mb_client.port = args.port
+        mbt_cmd.mb_client.unit_id = args.unit_id
+        mbt_cmd.mb_client.timeout = args.timeout
+        mbt_cmd.mb_client.debug = args.debug
         # start cli loop or just a one shot run (command set at cmd line)
         if not args.command:
             mbt_cmd.cmdloop()

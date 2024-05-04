@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mbt_cli"
+dynamic = ["dependencies", "version"]
+license = { text = "MIT" }
+authors = [{ name = "Loïc Lefebvre" }]
+description = "A modbus/TCP client command-line interface"
+requires-python = ">=3.9"
+
+[project.scripts]
+mbt-cli = "mbt_cli.main:main"
+
+[project.urls]
+Homepage = "https://github.com/sourceperl/mbt-cli/"
+
+[tool.setuptools]
+packages = ["mbt_cli"]
+dynamic.dependencies = { file = "requirements.txt" }
+dynamic.version = { attr = "mbt_cli.__version__" }
