@@ -38,25 +38,15 @@ class MbtCmd(cmd.Cmd):
         """Avoid empty line execute again the last command"""
         return False
 
-    def _parse_read_args(self, arg: str):
-        args_l = arg.split()
-        try:
-            self.request.address = int(args_l[0])
-        except IndexError:
-            self.request.address = 0
-        try:
-            self.request.number = int(args_l[1])
-        except IndexError:
-            self.request.number = 1
-
     def _dump_results(self, ret_list: list, cmd_args: Namespace):
         if ret_list:
-            for idx in range(0, cmd_args.number):
+            for reg_idx in range(0, cmd_args.number):
                 try:
-                    reg_str = str(ret_list[idx])
+                    reg_as_str = str(ret_list[reg_idx])
                 except IndexError:
-                    reg_str = 'n/a'
-                print(f'{idx} @{cmd_args.address + idx} {reg_str}')
+                    reg_as_str = 'n/a'
+                reg_addr = cmd_args.address + reg_idx
+                print(f'{reg_idx} @{reg_addr} {reg_as_str}')
         elif not self.mb_client.debug:
             except_str = f' ({self.mb_client.last_except_as_txt})' if self.mb_client.last_error == MB_EXCEPT_ERR else ''
             print(self.mb_client.last_error_as_txt + except_str)
@@ -155,7 +145,7 @@ class MbtCmd(cmd.Cmd):
             print(e)
 
     def do_read_holding_registers(self, arg: str = ''):
-        """Modbus function 3 (read holding registers)\n\nread_holding_registers [address] [number of inputs]"""
+        """Modbus function 3 (read holding registers)\n\nread_holding_registers [address] [number of registers]"""
         try:
             # parse args
             cmd_parser = ArgumentParser(add_help=False, exit_on_error=False)
@@ -170,7 +160,7 @@ class MbtCmd(cmd.Cmd):
             print(e)
 
     def do_read_input_registers(self, arg: str = ''):
-        """Modbus function 4 (read input registers)\n\nread_input_registers [address] [number of inputs]"""
+        """Modbus function 4 (read input registers)\n\nread_input_registers [address] [number of registers]"""
         try:
             # parse args
             cmd_parser = ArgumentParser(add_help=False, exit_on_error=False)
