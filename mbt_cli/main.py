@@ -23,6 +23,14 @@ def valid_int(min: int, max: int):
 
 
 # some class
+class CmdArgParser(ArgumentParser):
+    def parse_cmd_args(self, line: str):
+        return self.parse_args(line.split())
+
+    def error(self, message):
+        raise ArgumentError(argument=None, message=message)
+
+
 class MbtCmd(cmd.Cmd):
     """ CLI tool to deal with a modbus/TCP server. """
 
@@ -118,10 +126,10 @@ class MbtCmd(cmd.Cmd):
         """Modbus function 1 (read coils)\n\nread_coils [address] [number of coils]"""
         try:
             # parse args
-            cmd_parser = ArgumentParser(add_help=False, exit_on_error=False)
+            cmd_parser = CmdArgParser(add_help=False, exit_on_error=False)
             cmd_parser.add_argument('address', nargs='?', type=valid_int(min=0, max=0xffff), default=0)
             cmd_parser.add_argument('number', nargs='?', type=valid_int(min=1, max=2000), default=1)
-            cmd_args = cmd_parser.parse_args(arg.split())
+            cmd_args = cmd_parser.parse_cmd_args(arg)
             # do modbus job
             ret_list = self.mb_client.read_coils(cmd_args.address, cmd_args.number)
             # show result
@@ -133,10 +141,10 @@ class MbtCmd(cmd.Cmd):
         """Modbus function 2 (read discrete inputs)\n\nread_discrete_inputs [address] [number of inputs]"""
         try:
             # parse args
-            cmd_parser = ArgumentParser(add_help=False, exit_on_error=False)
+            cmd_parser = CmdArgParser(add_help=False, exit_on_error=False)
             cmd_parser.add_argument('address', nargs='?', type=valid_int(min=0, max=0xffff), default=0)
             cmd_parser.add_argument('number', nargs='?', type=valid_int(min=1, max=2000), default=1)
-            cmd_args = cmd_parser.parse_args(arg.split())
+            cmd_args = cmd_parser.parse_cmd_args(arg)
             # do modbus job
             ret_list = self.mb_client.read_discrete_inputs(cmd_args.address, cmd_args.number)
             # show result
@@ -148,10 +156,10 @@ class MbtCmd(cmd.Cmd):
         """Modbus function 3 (read holding registers)\n\nread_holding_registers [address] [number of registers]"""
         try:
             # parse args
-            cmd_parser = ArgumentParser(add_help=False, exit_on_error=False)
+            cmd_parser = CmdArgParser(add_help=False, exit_on_error=False)
             cmd_parser.add_argument('address', nargs='?', type=valid_int(min=0, max=0xffff), default=0)
             cmd_parser.add_argument('number', nargs='?', type=valid_int(min=1, max=125), default=1)
-            cmd_args = cmd_parser.parse_args(arg.split())
+            cmd_args = cmd_parser.parse_cmd_args(arg)
             # do modbus job
             ret_list = self.mb_client.read_holding_registers(cmd_args.address, cmd_args.number)
             # show result
@@ -163,14 +171,50 @@ class MbtCmd(cmd.Cmd):
         """Modbus function 4 (read input registers)\n\nread_input_registers [address] [number of registers]"""
         try:
             # parse args
-            cmd_parser = ArgumentParser(add_help=False, exit_on_error=False)
+            cmd_parser = CmdArgParser(add_help=False, exit_on_error=False)
             cmd_parser.add_argument('address', nargs='?', type=valid_int(min=0, max=0xffff), default=0)
             cmd_parser.add_argument('number', nargs='?', type=valid_int(min=1, max=125), default=1)
-            cmd_args = cmd_parser.parse_args(arg.split())
+            cmd_args = cmd_parser.parse_cmd_args(arg)
             # do modbus job
             ret_list = self.mb_client.read_input_registers(cmd_args.address, cmd_args.number)
             # show result
             self._dump_results(ret_list, cmd_args)
+        except (ArgumentError, ValueError) as e:
+            print(e)
+
+    def do_write_single_coil(self, arg: str = ''):
+        """Modbus function 5 (write single coil)\n\nwrite_single_coil [address] [coil value]"""
+        try:
+            # parse args
+            cmd_parser = CmdArgParser(add_help=False, exit_on_error=False)
+            cmd_parser.add_argument('address', type=valid_int(min=0, max=0xffff))
+            cmd_parser.add_argument('value', type=valid_int(min=0, max=1))
+            cmd_args = cmd_parser.parse_cmd_args(arg)
+            # do modbus job
+            write_ok = self.mb_client.write_single_coil(cmd_args.address, cmd_args.value)
+            # show result
+            if write_ok:
+                print('coil write ok')
+            else:
+                print('unable to set coil')
+        except (ArgumentError, ValueError) as e:
+            print(e)
+
+    def do_write_single_register(self, arg: str = ''):
+        """Modbus function 6 (write single register)\n\nwrite_single_register [address] [register value]"""
+        try:
+            # parse args
+            cmd_parser = CmdArgParser(add_help=False, exit_on_error=False)
+            cmd_parser.add_argument('address', type=valid_int(min=0, max=0xffff))
+            cmd_parser.add_argument('value', type=valid_int(min=0, max=0xffff))
+            cmd_args = cmd_parser.parse_cmd_args(arg)
+            # do modbus job
+            write_ok = self.mb_client.write_single_register(cmd_args.address, cmd_args.value)
+            # show result
+            if write_ok:
+                print('register write ok')
+            else:
+                print('unable to set register')
         except (ArgumentError, ValueError) as e:
             print(e)
 
