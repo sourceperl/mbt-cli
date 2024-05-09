@@ -1,5 +1,7 @@
 from argparse import ArgumentError, ArgumentParser, ArgumentTypeError, Namespace
 import cmd
+import re
+import sys
 from pyModbusTCP.client import ModbusClient
 from pyModbusTCP.constants import MB_EXCEPT_ERR
 from . import __version__ as VERSION
@@ -10,10 +12,30 @@ NAME = 'mbt-cli'
 
 
 # some functions
+def replace_hex(line: str) -> str:
+    """ Convert hexadecimal string "0x10" to its decimal value "16". """
+    return re.sub(r'0[xX][0-9a-fA-F]+', lambda match: str(int(match.group(0), 16)), line)
+
+
+def preprocess_args(args: list | str) -> list:
+    """ Convert args (as str or list) to a new preprocessed list. """
+    # ensure args is a list
+    if isinstance(args, str):
+        args = args.split()
+    # init preprocessed argument list
+    pp_args = []
+    # apply preprocess filter
+    for arg in args:
+        # convert hex -> decimal
+        arg = replace_hex(arg)
+        pp_args.append(arg)
+    return pp_args
+
+
 def valid_int(min: int, max: int):
     def _valid_int(x: str):
         try:
-            x = int(x, 0)
+            x = int(x)
         except ValueError:
             raise ArgumentTypeError('not an int')
         if not min <= x <= max:
@@ -25,9 +47,9 @@ def valid_int(min: int, max: int):
 # some class
 class CmdArgParser(ArgumentParser):
     def parse_cmd_args(self, line: str):
-        return self.parse_args(line.split())
+        return self.parse_args(preprocess_args(line))
 
-    def error(self, message):
+    def error(self, message: str):
         raise ArgumentError(argument=None, message=message)
 
 
@@ -50,11 +72,11 @@ class MbtCmd(cmd.Cmd):
         if ret_list:
             for reg_idx in range(0, cmd_args.number):
                 try:
-                    reg_as_str = str(ret_list[reg_idx])
+                    reg_as_str = str(ret_list[reg_idx]).lower()
                 except IndexError:
                     reg_as_str = 'n/a'
                 reg_addr = cmd_args.address + reg_idx
-                print(f'{reg_idx} @{reg_addr} {reg_as_str}')
+                print(f'{reg_idx:<4} @{reg_addr:<5} (0x{reg_addr:<4x})  {reg_as_str}')
         elif not self.mb_client.debug:
             except_str = f' ({self.mb_client.last_except_as_txt})' if self.mb_client.last_error == MB_EXCEPT_ERR else ''
             print(self.mb_client.last_error_as_txt + except_str)
@@ -237,7 +259,7 @@ def main():
     parser.add_argument('-t', '--timeout', type=float, default=5.0, help='server timeout delay in s (default: 5.0)')
     parser.add_argument('-u', '--unit-id', type=int, default=1, help='unit-id (default is 1)')
     parser.add_argument('command', nargs='*', default='', help='command to execute')
-    args = parser.parse_args()
+    args = parser.parse_args(preprocess_args(sys.argv[1:]))
 
     # run tool
     try:
