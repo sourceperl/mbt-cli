@@ -4,6 +4,7 @@ import re
 import sys
 from pyModbusTCP.client import ModbusClient
 from pyModbusTCP.constants import MB_EXCEPT_ERR
+from pyModbusTCP.utils import get_2comp
 from . import __version__ as VERSION
 
 
@@ -68,15 +69,34 @@ class MbtCmd(cmd.Cmd):
         """Avoid empty line execute again the last command"""
         return False
 
-    def _dump_results(self, ret_list: list, cmd_args: Namespace):
+    def _dump_bool_results(self, ret_list: list, cmd_args: Namespace):
+        print(f"{'#':<4} {'address':<17} {'bool'}")
+        for reg_idx in range(0, cmd_args.number):
+            try:
+                bool_as_str = str(ret_list[reg_idx]).lower()
+            except IndexError:
+                bool_as_str = 'n/a'
+            reg_addr = cmd_args.address + reg_idx
+            print(f'{reg_idx:04} @{reg_addr:>5} [0x{reg_addr:04x}] = {bool_as_str}')
+
+    def _dump_word_results(self, ret_list: list, cmd_args: Namespace):
+        print(f"{'#':<4} {'address':<17} {'u16':<6} {'i16':<6}")
+        for reg_idx in range(0, cmd_args.number):
+            try:
+                u16_as_str = str(ret_list[reg_idx])
+                i16_as_str = str(get_2comp(ret_list[reg_idx]))
+            except IndexError:
+                u16_as_str = 'n/a'
+                i16_as_str = 'n/a'
+            reg_addr = cmd_args.address + reg_idx
+            print(f'{reg_idx:04} @{reg_addr:>5} [0x{reg_addr:04x}] = {u16_as_str:<6} {i16_as_str:<6}')
+
+    def _dump_results(self, ret_list: list, cmd_args: Namespace, as_bool: bool = False):
         if ret_list:
-            for reg_idx in range(0, cmd_args.number):
-                try:
-                    reg_as_str = str(ret_list[reg_idx]).lower()
-                except IndexError:
-                    reg_as_str = 'n/a'
-                reg_addr = cmd_args.address + reg_idx
-                print(f'{reg_idx:<4} @{reg_addr:<5} (0x{reg_addr:<4x})  {reg_as_str}')
+            if as_bool:
+                self._dump_bool_results(ret_list, cmd_args)
+            else:
+                self._dump_word_results(ret_list, cmd_args)
         elif not self.mb_client.debug:
             except_str = f' ({self.mb_client.last_except_as_txt})' if self.mb_client.last_error == MB_EXCEPT_ERR else ''
             print(self.mb_client.last_error_as_txt + except_str)
@@ -155,7 +175,7 @@ class MbtCmd(cmd.Cmd):
             # do modbus job
             ret_list = self.mb_client.read_coils(cmd_args.address, cmd_args.number)
             # show result
-            self._dump_results(ret_list, cmd_args)
+            self._dump_results(ret_list, cmd_args, as_bool=True)
         except (ArgumentError, ValueError) as e:
             print(e)
 
@@ -170,7 +190,7 @@ class MbtCmd(cmd.Cmd):
             # do modbus job
             ret_list = self.mb_client.read_discrete_inputs(cmd_args.address, cmd_args.number)
             # show result
-            self._dump_results(ret_list, cmd_args)
+            self._dump_results(ret_list, cmd_args, as_bool=True)
         except (ArgumentError, ValueError) as e:
             print(e)
 
