@@ -4,7 +4,7 @@ import re
 import sys
 from pyModbusTCP.client import ModbusClient
 from pyModbusTCP.constants import MB_EXCEPT_ERR
-from pyModbusTCP.utils import get_2comp
+from pyModbusTCP.utils import decode_ieee, get_2comp
 from . import __version__ as VERSION
 
 
@@ -59,6 +59,7 @@ class MbtCmd(cmd.Cmd):
 
     intro = 'CLI tool to deal with a modbus/TCP server (type help or ?).'
     mb_client = ModbusClient()
+    dump_hex = False
 
     @property
     def prompt(self):
@@ -80,16 +81,42 @@ class MbtCmd(cmd.Cmd):
             print(f'{reg_idx:04} @{reg_addr:>5} [0x{reg_addr:04x}] = {bool_as_str}')
 
     def _dump_word_results(self, ret_list: list, cmd_args: Namespace):
-        print(f"{'#':<4} {'address':<17} {'u16':<6} {'i16':<6}")
+        print(f"{'#':<4} {'address':<17} {'u16':<8} {'i16':<8} {'u32':<11} {'i32':<11} {'f32':<11}")
         for reg_idx in range(0, cmd_args.number):
-            try:
-                u16_as_str = str(ret_list[reg_idx])
-                i16_as_str = str(get_2comp(ret_list[reg_idx]))
-            except IndexError:
-                u16_as_str = 'n/a'
-                i16_as_str = 'n/a'
+            # current address
             reg_addr = cmd_args.address + reg_idx
-            print(f'{reg_idx:04} @{reg_addr:>5} [0x{reg_addr:04x}] = {u16_as_str:<6} {i16_as_str:<6}')
+            # 16 bits values
+            try:
+                u16 = ret_list[reg_idx]
+                i16 = get_2comp(u16)
+            except IndexError:
+                u16 = None
+                i16 = None
+            # 32 bits values
+            try:
+                u32 = (ret_list[reg_idx] << 16) + ret_list[reg_idx + 1]
+                i32 = get_2comp(u32, val_size=32)
+                f32 = decode_ieee(u32)
+            except IndexError:
+                u32 = None
+                i32 = None
+                f32 = None
+            # set format vars
+            if self.dump_hex:
+                pfix, fmt16, fmt32 = '0x', '04x', '08x'
+            else:
+                pfix, fmt16, fmt32 = '', '', ''
+            # format values as str
+            u16_as_str = f'{pfix}{u16:{fmt16}}' if u16 is not None else 'n/a'
+            i16_sign = '-' if i16 and i16 < 0 else ''
+            i16_as_str = f'{i16_sign}{pfix}{abs(i16):{fmt16}}' if i16 is not None else 'n/a'
+            u32_as_str = f'{pfix}{u32:{fmt32}}' if u32 is not None else 'n/a'
+            i32_sign = '-' if i32 and i32 < 0 else ''
+            i32_as_str = f'{i32_sign}{pfix}{abs(i32):{fmt32}}' if i32 is not None else 'n/a'
+            f32_as_str = f'{f32}' if f32 is not None else 'n/a'
+            # dump all
+            print(f'{reg_idx:04} @{reg_addr:>5} [0x{reg_addr:04x}] = '
+                  f'{u16_as_str:<8} {i16_as_str:<8} {u32_as_str:<11} {i32_as_str:<11} {f32_as_str:<11}')
 
     def _dump_results(self, ret_list: list, cmd_args: Namespace, as_bool: bool = False):
         if ret_list:
@@ -278,6 +305,7 @@ def main():
     parser.add_argument('-p', '--port', type=int, default=502, help='server TCP port (default: 502)')
     parser.add_argument('-t', '--timeout', type=float, default=5.0, help='server timeout delay in s (default: 5.0)')
     parser.add_argument('-u', '--unit-id', type=int, default=1, help='unit-id (default is 1)')
+    parser.add_argument('--hex', action='store_true', help='display results in hexadecimal')
     parser.add_argument('command', nargs='*', default='', help='command to execute')
     args = parser.parse_args(preprocess_args(sys.argv[1:]))
 
@@ -291,6 +319,7 @@ def main():
         mbt_cmd.mb_client.unit_id = args.unit_id
         mbt_cmd.mb_client.timeout = args.timeout
         mbt_cmd.mb_client.debug = args.debug
+        mbt_cmd.dump_hex = args.hex
         # start cli loop or just a one shot run (command set at cmd line)
         if not args.command:
             mbt_cmd.cmdloop()
