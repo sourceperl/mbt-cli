@@ -13,6 +13,9 @@ NAME = 'mbt-cli'
 
 
 # some functions
+def swap_bytes(x: int) -> int:
+    return int.from_bytes(x.to_bytes(2, byteorder='little'), byteorder='big')
+
 def replace_hex(line: str) -> str:
     """ Convert hexadecimal string "0x10" to its decimal value "16". """
     return re.sub(r'0[xX][0-9a-fA-F]+', lambda match: str(int(match.group(0), 16)), line)
@@ -60,6 +63,9 @@ class MbtCmd(cmd.Cmd):
     intro = 'CLI tool to deal with a modbus/TCP server (type help or ?).'
     mb_client = ModbusClient()
     dump_hex = False
+    swap_bytes = False
+    swap_words = False
+    dump_32b = False
 
     @property
     def prompt(self):
@@ -81,20 +87,44 @@ class MbtCmd(cmd.Cmd):
             print(f'{reg_idx:04} @{reg_addr:>5} [0x{reg_addr:04x}] = {bool_as_str}')
 
     def _dump_word_results(self, ret_list: list, cmd_args: Namespace):
-        print(f"{'#':<4} {'address':<17} {'u16':<8} {'i16':<8} {'u32':<11} {'i32':<11} {'f32':<11}")
+        # head
+        head = f"{'#':<4} {'address':<17} {'raw':<8} "
+        if self.dump_32b:
+            head += f"{'u32':<11} {'i32':<11} {'f32':<11}"
+        else:
+            head += f"{'u16':<8} {'i16':<8} {'ascii':<12}"
+        print(head)
+        # lines
         for reg_idx in range(0, cmd_args.number):
             # current address
             reg_addr = cmd_args.address + reg_idx
             # 16 bits values
             try:
-                u16 = ret_list[reg_idx]
+                raw_register = ret_list[reg_idx]
+                u16 = raw_register
+                if self.swap_bytes:
+                    u16 = swap_bytes(u16)
                 i16 = get_2comp(u16)
+                byte_1 = (u16 >> 8) & 0xff
+                byte_2 = u16  & 0xff
+                u16_bytes = bytes([byte_1, byte_2])
             except IndexError:
+                raw_register = None
                 u16 = None
                 i16 = None
+                u16_bytes = None
             # 32 bits values
             try:
-                u32 = (ret_list[reg_idx] << 16) + ret_list[reg_idx + 1]
+                if self.swap_bytes:
+                    word_0 = swap_bytes(ret_list[reg_idx])
+                    word_1 = swap_bytes(ret_list[reg_idx + 1])
+                else:
+                    word_0 = ret_list[reg_idx]
+                    word_1 = ret_list[reg_idx + 1]
+                if self.swap_words:
+                    u32 = (word_1 << 16) + word_0
+                else:
+                    u32 = (word_0 << 16) + word_1
                 i32 = get_2comp(u32, val_size=32)
                 f32 = decode_ieee(u32)
             except IndexError:
@@ -107,16 +137,26 @@ class MbtCmd(cmd.Cmd):
             else:
                 pfix, fmt16, fmt32 = '', '', ''
             # format values as str
-            u16_as_str = f'{pfix}{u16:{fmt16}}' if u16 is not None else 'n/a'
-            i16_sign = '-' if i16 and i16 < 0 else ''
-            i16_as_str = f'{i16_sign}{pfix}{abs(i16):{fmt16}}' if i16 is not None else 'n/a'
-            u32_as_str = f'{pfix}{u32:{fmt32}}' if u32 is not None else 'n/a'
-            i32_sign = '-' if i32 and i32 < 0 else ''
-            i32_as_str = f'{i32_sign}{pfix}{abs(i32):{fmt32}}' if i32 is not None else 'n/a'
-            f32_as_str = f'{f32}' if f32 is not None else 'n/a'
-            # dump all
-            print(f'{reg_idx:04} @{reg_addr:>5} [0x{reg_addr:04x}] = '
-                  f'{u16_as_str:<8} {i16_as_str:<8} {u32_as_str:<11} {i32_as_str:<11} {f32_as_str:<11}')
+            # mandatory
+            raw_as_str = f'0x{raw_register:04x}' if raw_register is not None else 'n/a'
+            # on 32 or 16 bits mode
+            if self.dump_32b:
+                u32_as_str = f'{pfix}{u32:{fmt32}}' if u32 is not None else 'n/a'
+                i32_sign = '-' if i32 and i32 < 0 else ''
+                i32_as_str = f'{i32_sign}{pfix}{abs(i32):{fmt32}}' if i32 is not None else 'n/a'
+                f32_as_str = f'{f32}' if f32 is not None else 'n/a'
+            else:
+                u16_as_str = f'{pfix}{u16:{fmt16}}' if u16 is not None else 'n/a'
+                i16_sign = '-' if i16 and i16 < 0 else ''
+                i16_as_str = f'{i16_sign}{pfix}{abs(i16):{fmt16}}' if i16 is not None else 'n/a'
+                ascii_as_str = f'{u16_bytes}'
+            # dump
+            line = f'{reg_idx:04} @{reg_addr:>5} [0x{reg_addr:04x}] = {raw_as_str:<8} '
+            if self.dump_32b:
+                line += f'{u32_as_str:<11} {i32_as_str:<11} {f32_as_str:<11}'
+            else:
+                line += f'{u16_as_str:<8} {i16_as_str:<8} {ascii_as_str:<12}'
+            print(line)
 
     def _dump_results(self, ret_list: list, cmd_args: Namespace, as_bool: bool = False):
         if ret_list:
@@ -142,6 +182,66 @@ class MbtCmd(cmd.Cmd):
         # show status
         debug_str = 'on' if self.mb_client.debug else 'off'
         print(f'debug is {debug_str}')
+
+    def do_dump_hex(self, arg: str = ''):
+        """Check or set dump as hexadecimal\n\ndump_hex [on/off]"""
+        # try to set
+        hex_set = arg.strip().lower()
+        if hex_set:
+            if hex_set == 'on':
+                self.dump_hex = True
+            elif hex_set == 'off':
+                self.dump_hex = False
+            else:
+                print('unable to set hex flag')
+        # show status
+        hex_str = 'on' if self.dump_hex else 'off'
+        print(f'dump hex is {hex_str}')
+
+    def do_dump_32b(self, arg: str = ''):
+        """Check or set dump in 32 bits mode\n\ndump_32b [on/off]"""
+        # try to set
+        d32b_set = arg.strip().lower()
+        if d32b_set:
+            if d32b_set == 'on':
+                self.dump_32b = True
+            elif d32b_set == 'off':
+                self.dump_32b = False
+            else:
+                print('unable to set dump 32 bits flag')
+        # show status
+        d32b_str = 'on' if self.dump_32b else 'off'
+        print(f'dump 32 bits is {d32b_str}')
+
+    def do_swap_bytes(self, arg: str = ''):
+        """Check or set swap bytes mode\n\nswap_bytes [on/off]"""
+        # try to set
+        swap_set = arg.strip().lower()
+        if swap_set:
+            if swap_set == 'on':
+                self.swap_bytes = True
+            elif swap_set == 'off':
+                self.swap_bytes = False
+            else:
+                print('unable to set swap bytes flag')
+        # show status
+        swap_str = 'on' if self.swap_bytes else 'off'
+        print(f'swap bytes is {swap_str}')
+
+    def do_swap_words(self, arg: str = ''):
+        """Check or set swap words mode\n\nswap_words [on/off]"""
+        # try to set
+        swap_set = arg.strip().lower()
+        if swap_set:
+            if swap_set == 'on':
+                self.swap_words = True
+            elif swap_set == 'off':
+                self.swap_words = False
+            else:
+                print('unable to set swap words flag')
+        # show status
+        swap_str = 'on' if self.swap_words else 'off'
+        print(f'swap words is {swap_str}')
 
     def do_host(self, arg: str = ''):
         """Check or set host\n\nhost [hostname/ip address/fqdn]"""
@@ -300,13 +400,16 @@ def main():
     # parse command line args
     parser = ArgumentParser(add_help=False)
     parser.add_argument('--help', action='help', help='show this help message and exit')
-    parser.add_argument('-d', '--debug', action='store_true', help='debug mode')
+    parser.add_argument('-d', '--debug', action='store_true', help='turn on debug mode')
     parser.add_argument('-h', '--host', type=str, default='localhost', help='server host (default: localhost)')
     parser.add_argument('-p', '--port', type=int, default=502, help='server TCP port (default: 502)')
     parser.add_argument('-t', '--timeout', type=float, default=5.0, help='server timeout delay in s (default: 5.0)')
     parser.add_argument('-u', '--unit-id', type=int, default=1, help='unit-id (default is 1)')
-    parser.add_argument('--hex', action='store_true', help='display results in hexadecimal')
-    parser.add_argument('command', nargs='*', default='', help='command to execute')
+    parser.add_argument('--dump-hex', action='store_true', help='display results in hexadecimal')
+    parser.add_argument('--dump-32b', action='store_true', help='display results as 32 bits data')
+    parser.add_argument('--swap-bytes', action='store_true', help='swap bytes in 16 bits elements')
+    parser.add_argument('--swap-words', action='store_true', help='swap words in 32 bits elements')
+    parser.add_argument('command', nargs='*', default='', help='command (with args) to execute')
     args = parser.parse_args(preprocess_args(sys.argv[1:]))
 
     # run tool
@@ -319,7 +422,10 @@ def main():
         mbt_cmd.mb_client.unit_id = args.unit_id
         mbt_cmd.mb_client.timeout = args.timeout
         mbt_cmd.mb_client.debug = args.debug
-        mbt_cmd.dump_hex = args.hex
+        mbt_cmd.dump_hex = args.dump_hex
+        mbt_cmd.dump_32b = args.dump_32b
+        mbt_cmd.swap_bytes = args.swap_bytes
+        mbt_cmd.swap_words = args.swap_words
         # start cli loop or just a one shot run (command set at cmd line)
         if not args.command:
             mbt_cmd.cmdloop()
