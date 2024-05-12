@@ -1,7 +1,6 @@
 from argparse import ArgumentError, ArgumentParser, ArgumentTypeError, Namespace
 import cmd
 import re
-import sys
 from pyModbusTCP.client import ModbusClient
 from pyModbusTCP.constants import MB_EXCEPT_ERR
 from pyModbusTCP.utils import decode_ieee, get_2comp
@@ -16,24 +15,10 @@ NAME = 'mbt-cli'
 def swap_bytes(x: int) -> int:
     return int.from_bytes(x.to_bytes(2, byteorder='little'), byteorder='big')
 
+
 def replace_hex(line: str) -> str:
     """ Convert hexadecimal string "0x10" to its decimal value "16". """
-    return re.sub(r'0[xX][0-9a-fA-F]+', lambda match: str(int(match.group(0), 16)), line)
-
-
-def preprocess_args(args: list | str) -> list:
-    """ Convert args (as str or list) to a new preprocessed list. """
-    # ensure args is a list
-    if isinstance(args, str):
-        args = args.split()
-    # init preprocessed argument list
-    pp_args = []
-    # apply preprocess filter
-    for arg in args:
-        # convert hex -> decimal
-        arg = replace_hex(arg)
-        pp_args.append(arg)
-    return pp_args
+    return re.sub(r'^\-?0[xX][0-9a-fA-F]+$', lambda match: str(int(match.group(0), 16)), line)
 
 
 def valid_int(min: int, max: int):
@@ -50,8 +35,23 @@ def valid_int(min: int, max: int):
 
 # some class
 class CmdArgParser(ArgumentParser):
+    def _preprocess_args(self, args: list | str) -> list:
+        """ Convert args (as str or list) to a new preprocessed list. """
+        # ensure args is a list
+        if isinstance(args, str):
+            args = args.split()
+        # init preprocessed argument list
+        pp_args = []
+        # apply filters to args
+        for arg in args:
+            # convert hex -> decimal
+            # this avoid error on neg hex parse "unrecognized arguments: -0x[...]")
+            arg = replace_hex(arg)
+            pp_args.append(arg)
+        return pp_args
+
     def parse_cmd_args(self, line: str):
-        return self.parse_args(preprocess_args(line))
+        return self.parse_args(self._preprocess_args(line))
 
     def error(self, message: str):
         raise ArgumentError(argument=None, message=message)
@@ -76,7 +76,7 @@ class MbtCmd(cmd.Cmd):
         """Avoid empty line execute again the last command"""
         return False
 
-    def _dump_bool_results(self, ret_list: list, cmd_args: Namespace):
+    def _dump_bool_results(self, ret_list: list, cmd_args: Namespace) -> None:
         print(f"{'#':<4} {'address':<17} {'bool'}")
         for reg_idx in range(0, cmd_args.number):
             try:
@@ -86,7 +86,7 @@ class MbtCmd(cmd.Cmd):
             reg_addr = cmd_args.address + reg_idx
             print(f'{reg_idx:04} @{reg_addr:>5} [0x{reg_addr:04x}] = {bool_as_str}')
 
-    def _dump_word_results(self, ret_list: list, cmd_args: Namespace):
+    def _dump_word_results(self, ret_list: list, cmd_args: Namespace) -> None:
         # head
         head = f"{'#':<4} {'address':<17} {'raw':<8} "
         if self.dump_32b:
@@ -106,7 +106,7 @@ class MbtCmd(cmd.Cmd):
                     u16 = swap_bytes(u16)
                 i16 = get_2comp(u16)
                 byte_1 = (u16 >> 8) & 0xff
-                byte_2 = u16  & 0xff
+                byte_2 = u16 & 0xff
                 u16_bytes = bytes([byte_1, byte_2])
             except IndexError:
                 raw_register = None
@@ -158,7 +158,7 @@ class MbtCmd(cmd.Cmd):
                 line += f'{u16_as_str:<8} {i16_as_str:<8} {ascii_as_str:<12}'
             print(line)
 
-    def _dump_results(self, ret_list: list, cmd_args: Namespace, as_bool: bool = False):
+    def _dump_results(self, ret_list: list, cmd_args: Namespace, as_bool: bool = False) -> None:
         if ret_list:
             if as_bool:
                 self._dump_bool_results(ret_list, cmd_args)
@@ -245,51 +245,62 @@ class MbtCmd(cmd.Cmd):
 
     def do_host(self, arg: str = ''):
         """Check or set host\n\nhost [hostname/ip address/fqdn]"""
-        # try to set
-        host_set = arg.strip().lower()
-        if host_set:
-            try:
-                self.mb_client.host = str(host_set)
-            except ValueError:
-                print('unable to set host')
-        # show status
-        print(f'current host is "{self.mb_client.host}"')
+        try:
+            # parse args
+            cmd_parser = CmdArgParser(add_help=False, exit_on_error=False)
+            cmd_parser.add_argument('value', nargs='?', type=str,
+                                    default=self.mb_client.host)
+            cmd_args = cmd_parser.parse_cmd_args(arg)
+            # set
+            self.mb_client.host = cmd_args.value
+            # show status
+            print(f'host set to {self.mb_client.host}')
+        except (ArgumentError, ValueError) as e:
+            print(e)
 
     def do_port(self, arg: str = ''):
         """Check or set port\n\nport [tcp port]"""
-        # try to set
-        port_set = arg.strip().lower()
-        if port_set:
-            try:
-                self.mb_client.port = int(port_set)
-            except ValueError:
-                print('unable to set port')
-        # show status
-        print(f'current port value is {self.mb_client.port}')
+        try:
+            # parse args
+            cmd_parser = CmdArgParser(add_help=False, exit_on_error=False)
+            cmd_parser.add_argument('value', nargs='?', type=valid_int(min=1, max=0xffff),
+                                    default=self.mb_client.port)
+            cmd_args = cmd_parser.parse_cmd_args(arg)
+            # set
+            self.mb_client.port = cmd_args.value
+            # show status
+            print(f'port set to {self.mb_client.port}')
+        except (ArgumentError, ValueError) as e:
+            print(e)
 
     def do_timeout(self, arg: str = ''):
         """Check or set timeout\n\ntimeout [timeout value in s]"""
-        # try to set
-        timeout_set = arg.strip().lower()
-        if timeout_set:
-            try:
-                self.mb_client.timeout = float(timeout_set)
-            except ValueError:
-                print('unable to set timeout')
-        # show status
-        print(f'timeout is {self.mb_client.timeout} s')
+        try:
+            # parse args
+            cmd_parser = CmdArgParser(add_help=False, exit_on_error=False)
+            cmd_parser.add_argument('value', nargs='?', type=float, default=self.mb_client.timeout)
+            cmd_args = cmd_parser.parse_cmd_args(arg)
+            # set
+            self.mb_client.timeout = cmd_args.value
+            # show status
+            print(f'timeout set to {self.mb_client.timeout} s')
+        except (ArgumentError, ValueError) as e:
+            print(e)
 
     def do_unit_id(self, arg: str = ''):
         """Check or set unit-id\n\nunit_id [unit_id]"""
-        # try to set
-        unit_id_set = arg.strip().lower()
-        if unit_id_set:
-            try:
-                self.mb_client.unit_id = int(unit_id_set)
-            except ValueError:
-                print('unable to set unit-id')
-        # show status
-        print(f'unit-id is set to {self.mb_clientt.unit_id}')
+        try:
+            # parse args
+            cmd_parser = CmdArgParser(add_help=False, exit_on_error=False)
+            cmd_parser.add_argument('value', nargs='?', type=valid_int(min=1, max=0xff),
+                                    default=self.mb_client.unit_id)
+            cmd_args = cmd_parser.parse_cmd_args(arg)
+            # set
+            self.mb_client.unit_id = cmd_args.unit_id
+            # show status
+            print(f'unit_id set to {self.mb_client.unit_id}')
+        except (ArgumentError, ValueError) as e:
+            print(e)
 
     def do_read_coils(self, arg: str = ''):
         """Modbus function 1 (read coils)\n\nread_coils [address] [number of coils]"""
@@ -401,16 +412,22 @@ def main():
     parser = ArgumentParser(add_help=False)
     parser.add_argument('--help', action='help', help='show this help message and exit')
     parser.add_argument('-d', '--debug', action='store_true', help='turn on debug mode')
+    parser.add_argument('-v', '--version', action='store_true', help='print version and exit')
     parser.add_argument('-h', '--host', type=str, default='localhost', help='server host (default: localhost)')
     parser.add_argument('-p', '--port', type=int, default=502, help='server TCP port (default: 502)')
     parser.add_argument('-t', '--timeout', type=float, default=5.0, help='server timeout delay in s (default: 5.0)')
     parser.add_argument('-u', '--unit-id', type=int, default=1, help='unit-id (default is 1)')
+    parser.add_argument('-c', '--cmd', type=str, default='', help='command(s) (with args) to execute')
     parser.add_argument('--dump-hex', action='store_true', help='display results in hexadecimal')
     parser.add_argument('--dump-32b', action='store_true', help='display results as 32 bits data')
     parser.add_argument('--swap-bytes', action='store_true', help='swap bytes in 16 bits elements')
     parser.add_argument('--swap-words', action='store_true', help='swap words in 32 bits elements')
-    parser.add_argument('command', nargs='*', default='', help='command (with args) to execute')
-    args = parser.parse_args(preprocess_args(sys.argv[1:]))
+    args = parser.parse_args()
+
+    # show version
+    if args.version:
+        print(f'{NAME} {VERSION}')
+        exit()
 
     # run tool
     try:
@@ -427,12 +444,12 @@ def main():
         mbt_cmd.swap_bytes = args.swap_bytes
         mbt_cmd.swap_words = args.swap_words
         # start cli loop or just a one shot run (command set at cmd line)
-        if not args.command:
+        if not args.cmd:
             mbt_cmd.cmdloop()
         else:
-            # convert list of args -> command line
-            cmd_line = ' '.join(args.command)
-            mbt_cmd.onecmd(cmd_line)
+            # execute cli commands pass on command line (--cmd "cmd1; cmd2...")
+            for cmd in args.cmd.split(';'):
+                mbt_cmd.onecmd(cmd)
     except ValueError as e:
         print(f'error occur: {e}')
     except KeyboardInterrupt:
