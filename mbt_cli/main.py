@@ -1,6 +1,7 @@
 from argparse import ArgumentError, ArgumentParser, ArgumentTypeError, Namespace
 import cmd
 import re
+import time
 from pyModbusTCP.client import ModbusClient
 from pyModbusTCP.constants import MB_EXCEPT_ERR
 from pyModbusTCP.utils import decode_ieee, get_2comp
@@ -182,6 +183,18 @@ class MbtCmd(cmd.Cmd):
         # show status
         debug_str = 'on' if self.mb_client.debug else 'off'
         print(f'debug is {debug_str}')
+
+    def do_wait(self, arg: str = ''):
+        """Wait a few seconds\n\nwait [seconds]"""
+        try:
+            # parse args
+            cmd_parser = CmdArgParser(add_help=False, exit_on_error=False)
+            cmd_parser.add_argument('value', nargs='?', type=float, default=1.0)
+            cmd_args = cmd_parser.parse_cmd_args(arg)
+            # wait n seconds
+            time.sleep(cmd_args.value)
+        except (ArgumentError, ValueError) as e:
+            print(e)
 
     def do_dump_hex(self, arg: str = ''):
         """Check or set dump as hexadecimal\n\ndump_hex [on/off]"""
@@ -370,7 +383,7 @@ class MbtCmd(cmd.Cmd):
             cmd_parser.add_argument('address', type=valid_int(min=0, max=0xffff))
             cmd_parser.add_argument('value', type=valid_int(min=0, max=1))
             cmd_args = cmd_parser.parse_cmd_args(arg)
-            # do modbus job
+            # modbus i/o
             write_ok = self.mb_client.write_single_coil(cmd_args.address, cmd_args.value)
             # show result
             if write_ok:
@@ -388,8 +401,11 @@ class MbtCmd(cmd.Cmd):
             cmd_parser.add_argument('address', type=valid_int(min=0, max=0xffff))
             cmd_parser.add_argument('value', type=valid_int(min=0, max=0xffff))
             cmd_args = cmd_parser.parse_cmd_args(arg)
-            # do modbus job
-            write_ok = self.mb_client.write_single_register(cmd_args.address, cmd_args.value)
+            # modbus i/o
+            raw_value = cmd_args.value
+            if self.swap_bytes:
+                raw_value = swap_bytes(raw_value)
+            write_ok = self.mb_client.write_single_register(cmd_args.address, raw_value)
             # show result
             if write_ok:
                 print('register write ok')
