@@ -2,6 +2,7 @@ from argparse import ArgumentError, ArgumentParser, ArgumentTypeError, Namespace
 import cmd
 import re
 import time
+from typing import Union
 from pyModbusTCP.client import ModbusClient
 from pyModbusTCP.constants import MB_EXCEPT_ERR
 from pyModbusTCP.utils import decode_ieee, get_2comp
@@ -36,7 +37,7 @@ def valid_int(min: int, max: int):
 
 # some class
 class CmdArgParser(ArgumentParser):
-    def _preprocess_args(self, args: list | str) -> list:
+    def _preprocess_args(self, args: Union[list, str]) -> list:
         """ Convert args (as str or list) to a new preprocessed list. """
         # ensure args is a list
         if isinstance(args, str):
@@ -309,7 +310,7 @@ class MbtCmd(cmd.Cmd):
                                     default=self.mb_client.unit_id)
             cmd_args = cmd_parser.parse_cmd_args(arg)
             # set
-            self.mb_client.unit_id = cmd_args.unit_id
+            self.mb_client.unit_id = cmd_args.value
             # show status
             print(f'unit_id set to {self.mb_client.unit_id}')
         except (ArgumentError, ValueError) as e:
